@@ -6,7 +6,7 @@
 
 namespace Walnut {
 
-	class Random
+	class Random 
 	{
 	public:
 		static void Init()
