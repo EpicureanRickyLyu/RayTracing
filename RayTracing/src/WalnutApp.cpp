@@ -22,16 +22,17 @@ public:
 			sphere.Radius = 0.5f;
 			sphere.Albedo = { 1.0f, 0.0f, 1.0f };
 			m_scene.Spheres.push_back(sphere);
-			m_scene.Spheres.push_back(sphere);
 		}
 
 		{
 			Sphere sphere;
-			sphere.Position = { 2.0f,0.0f,0.0f };
+			sphere.Position = { 2.0f, 0.5f, 0.0f };
 			sphere.Radius = 1.0f;
-			sphere.Albedo = { 0.0f, 1.0f, 1.0f };
+			sphere.Albedo = { 0.0f, 0.0f, 1.0f };
 			m_scene.Spheres.push_back(sphere);
 		}
+
+		m_scene.m_LightDirection = glm::vec3(1.0f, 1.0f, 1.0f);
 	}
 public:
 
@@ -48,34 +49,26 @@ public:
 	virtual void OnUIRender() override
 	{
 		ImGui::Begin("Settings");
-		ImGui::Text("Last render: %.3fms", m_LastRenderTime);
-		//create button set click event 
-		if (ImGui::Button("Render"))
-		{
-			Render();
-		}
+			ImGui::Text("Last render: %.3fms", m_LastRenderTime);
+			//create button set click event 
+			if (ImGui::Button("Render"))
+			{
+				Render();
+			}
 		ImGui::End();
 		
-
 		ImGui::Begin("Scene");
 		ImGui::DragFloat3("Position", glm::value_ptr(m_scene.Spheres[0].Position), 0.05f);
 		ImGui::DragFloat("Radius", &m_scene.Spheres[0].Radius, 0.05f);
-		ImGui::DragFloat3("Albedo", glm::value_ptr(m_scene.Spheres[0].Albedo), 0.05f);
-
-
-
+		ImGui::ColorEdit3("Albedo", glm::value_ptr(m_scene.Spheres[0].Albedo), 0.05f);		
+		ImGui::DragFloat3("LightDirection", glm::value_ptr(m_scene.m_LightDirection), 0.05f);
 		ImGui::End();
 
-
-
-
-
 		ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f,0.0f));
-		ImGui::Begin("Viewport");
 
+		ImGui::Begin("Viewport");
 		m_Viewportwidth = static_cast<uint32_t>(ImGui::GetContentRegionAvail().x);
 		m_ViewportHeight= static_cast<uint32_t>(ImGui::GetContentRegionAvail().y);
-	
 		//render
 		auto image = renderer.GetFinalImage();
 		if (image)
@@ -85,13 +78,10 @@ public:
 			ImGui::Image(image->GetDescriptorSet(), { (float)image->GetWidth(), (float)image->GetHeight() },
 				ImVec2(0, 1), ImVec2(1, 0));//flip uv
 		}
-
-
 		ImGui::End();
-		ImGui::PopStyleVar();// ? ?
-	
-	}
 
+		ImGui::PopStyleVar();// ? ?
+	}
 
 	void Render()
 	{
@@ -109,8 +99,8 @@ public:
 private:
 	Renderer renderer;
 	Camera m_Camera;
-	uint32_t m_Viewportwidth, m_ViewportHeight;
 	Scene m_scene;
+	uint32_t m_Viewportwidth, m_ViewportHeight;
 	float m_LastRenderTime;
 
 };

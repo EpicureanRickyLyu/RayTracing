@@ -35,24 +35,15 @@ void Renderer::OnResize(uint32_t width, uint32_t height)
 
 void Renderer::Render(const Scene& scene, const Camera& camera)
 {
-	Ray ray;
-
- 	ray.origin = camera.GetPosition();
-
+	m_pActiveScene = &scene;
+	m_pActiveCamera = &camera;
 
 	//fill data buffer 
 	for (uint32_t y = 0; y < m_Image->GetHeight(); y++)
 	{
 		for (uint32_t x = 0; x < m_Image->GetWidth(); x++)
 		{
-			//glm::vec2 coord = { (float)x / (float)m_Image->GetWidth(), (float)y / (float)m_Image->GetHeight() };//calculate uv map to (0,1)
-			//coord = coord * 2.0f - 1.0f; //map from (0,1) to (-1,1)
-			//coord.x *= (float)m_Image->GetWidth() / (float)m_Image->GetHeight();//fix x radio between x and y, to make ellipse into sphere
-			//coord -= 0.5f;//map to (-0.5, 0.5)
-
-			ray.dir = camera.GetRayDirections()[x + y * m_Image->GetWidth()];
-
-			glm::vec4 color = TraceRay(scene, ray);
+			glm::vec4 color = PerPixel(x, y);
 			color = glm::clamp(color, glm::vec4(0.0f), glm::vec4(1.0f));
 			m_ImageData[x + y * m_Image->GetWidth()] = Utils::ConvertToRGBA(color);
 		}
@@ -62,22 +53,15 @@ void Renderer::Render(const Scene& scene, const Camera& camera)
 }
 
 
-//implicit surface -> parametric linear equation
-//fragment shader -> pixel
-glm::vec4 Renderer::TraceRay(const Scene& scene, const Ray& ray)
-{
-	using namespace glm;
-	vec3 bkcolor = mix(vec3(0.8f, 1.0f, 1.0f), vec3(0.5f, 0.7f, 1.0f), 0.5f);//interpolate between two color
-	if (scene.Spheres.empty())
-	{
-		return glm::vec4(0, 0, 0, 1);
-	}
-	const Sphere* closestSphere = nullptr;
-	float hitDistance = std::numeric_limits<float>::max();
-	for (const Sphere& sphere : scene.Spheres)
-	{
-		const Sphere& sphere = scene.Spheres[0];
 
+Renderer::HitPayLoad Renderer::TraceRay( const Ray& ray)
+{
+	//GetClosest HitDistance
+	int closestSphereID = -1;
+	float hitDistance = std::numeric_limits<float>::max();
+	for (int i = 0; i < m_pActiveScene->Spheres.size(); i++)
+	{
+		const Sphere& sphere = m_pActiveScene->Spheres[i];
 		glm::vec3 origin = ray.origin - sphere.Position;
 		glm::vec3 rayOri(ray.origin);
 		glm::vec3 rayDir(ray.dir);
@@ -91,66 +75,89 @@ glm::vec4 Renderer::TraceRay(const Scene& scene, const Ray& ray)
 		float discrimant = b * b - 4.0f * a * c;// -b += sqrt(b^2 - 4ac) / 2a
 		float contourtorlerance = 0.1f;
 
-		// background,Output to screen// blue sky dome
+		// background,Output to screen< 0 no intersections, = 0 1 intersection,> 0 2 intersection
 		if (discrimant < 0.0f)
 			continue;
 	
-		float closePoint = ( - b - sqrt(discrimant) ) / (2.0f * a);
+		float closePoint = ( - b + sqrt(discrimant) ) / (2.0f * a);
 		//float t0 = ( - b + sqrt(discrimant) ) / (2.0f * a);
 		//t1 is closest point, hitpoint
-		if (closePoint < hitDistance)
+		if (closePoint > 0.0f && closePoint < hitDistance)
 		{
 			hitDistance = closePoint;
-			closestSphere = &sphere;
+			closestSphereID = i;
 		}
 	}
 
-	if (closestSphere == nullptr)
-	{
-		return glm::vec4(bkcolor, 1.0f);
-	}
+	if (closestSphereID < 0)
+		return Miss(ray);
 
-
-	glm::vec3 origin = ray.origin - closestSphere->Position;
-	glm::vec3 rayOri(ray.origin);
-	glm::vec3 rayDir(ray.dir);
-	normalize(rayDir);
-
-	//calculate line sphere intersections
-	float radius = closestSphere->Radius;
-	float a = glm::dot(rayDir, rayDir);//quadratic equation : rayDir.x * rayDir.x + rayDir.y * rayDir.y + rayDir.z  * rayDir.z;
-	float b = 2.0f * glm::dot(origin, rayDir);
-	float c = glm::dot(origin, origin) - radius * radius;
-	float discrimant = b * b - 4.0f * a * c;// -b += sqrt(b^2 - 4ac) / 2a
-	float contourtorlerance = 0.1f;
-
-
-	//second hit point ? further hitpoint
-	float t0 = ( - b + sqrt(discrimant) ) / (2.0f * a);
-	// background,Output to screen// blue sky dome
-	if (discrimant < 0.0f)
-	{
-		return glm::vec4(bkcolor, 1.0f);
-	}
+	return ClosestHit(ray, hitDistance, closestSphereID);
 	
-	//record hitpoint 
-	vec3 h1 = origin + rayDir * t0;
-	vec3 hitpoint = origin + rayDir * hitDistance;
-	vec3 normal = normalize(hitpoint);
-	vec3 lightDir = normalize(vec3( - 1, -1, -1 ));
+}
+glm::vec4 Renderer::PerPixel(uint32_t x, uint32_t y)
+{
+	using namespace glm;
 
-	float angle = glm::max(dot(normal, -lightDir), 0.0f);//equal to the degree between light and face normal
-	
-	//outline, when quadratic dicscrimant == 0, mean only one intersction
-	if (discrimant == 0.0f || discrimant < contourtorlerance)
-	{
-		return glm::vec4(0.3f, 0.3f, 0.3f, 0.3f);
-	}
-	else
-	{
-		//if angle > 0, means facing the light, < 0 means they are back face, the asign dark light
-		return glm::vec4(closestSphere->Albedo * angle, 1.0f);//why normal brighter?
-	}
-	
+	vec3 skyColor = mix(vec3(0.8f, 1.0f, 1.0f), vec3(0.5f, 0.7f, 1.0f), 0.5f);//interpolate between two color
+	Ray ray;
+	ray.origin = m_pActiveCamera->GetPosition();
+	ray.dir = m_pActiveCamera->GetRayDirections()[x + y * m_Image->GetWidth()];
 
+	glm::vec3 color(0.0f);
+	int bounces = 2;
+	float attenuation = 1.0f;
+	//for (int i = 0; i < bounces; i++)
+	//{
+	HitPayLoad payload  = TraceRay(ray);	
+	//If ray missed, No light then add sky color
+	if (payload.HitDistance < 0.0f)
+	{
+		color += vec3(0.0f,0.0f,0.0f) * attenuation;//bk color
+		//break;
+		return vec4(color, 1.0f);
+	}
+			
+	const Sphere& closestSphere = m_pActiveScene->Spheres[payload.ObjectIndex];
+	vec3 lightDir = normalize(m_pActiveScene->m_LightDirection);
+
+	float angle = glm::max(dot(payload.WorldNormal, -lightDir), 0.0f);//equal to the degree between light and face normal
+	glm::vec3 sphereColor = closestSphere.Albedo;
+
+	sphereColor *= angle;
+	color += attenuation * sphereColor;
+
+	attenuation *= 0.7f;
+
+		//when bounce change ray origin and move forward
+		//ray.origin = payload.WorldPosition + 0.0001f * payload.WorldNormal;
+		//ray.dir = glm::reflect(ray.dir, payload.WorldNormal);
+	//}
+
+	return vec4(color, 1.0f);
+}
+
+Renderer::HitPayLoad Renderer::ClosestHit(const Ray& ray, float hitDistance, uint32_t objectIndex)
+{
+	Renderer::HitPayLoad payLoad;
+
+	payLoad.HitDistance = hitDistance;
+	payLoad.ObjectIndex = objectIndex;
+
+	const Sphere& closestSphere = m_pActiveScene->Spheres[objectIndex];
+	glm::vec3 origin = ray.origin - closestSphere.Position;
+
+	payLoad.WorldPosition = origin + ray.dir * hitDistance;
+	payLoad.WorldNormal = normalize(payLoad.WorldPosition);
+
+	payLoad.WorldPosition += closestSphere.Position;
+
+	return payLoad;
+}
+
+Renderer::HitPayLoad Renderer::Miss(const Ray& ray)
+{
+	HitPayLoad payload;
+	payload.HitDistance = -1;
+	return payload;
 }
